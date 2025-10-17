@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram Beacon</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .beacon {
+            transition: background-color 0.5s ease-in-out, box-shadow 0.5s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex items-center justify-center min-h-screen">
+
+    <div class="text-center p-8">
+        <h1 class="text-4xl font-bold mb-4 text-gray-300">Beacon Status</h1>
+        
+        <!-- Beacon Visual -->
+        <div id="beacon" class="beacon w-64 h-64 rounded-full mx-auto flex items-center justify-center bg-gray-700 shadow-lg">
+            <span id="beacon-status-text" class="text-2xl font-medium text-gray-400">OFFLINE</span>
+        </div>
+
+        <!-- Logged Message -->
+        <div class="mt-8 p-6 bg-gray-800 rounded-lg min-h-[100px] max-w-lg mx-auto shadow-inner">
+            <h2 class="text-xl font-semibold mb-2 text-gray-400">Last Message</h2>
+            <p id="message-log" class="text-lg text-gray-300 italic">No message received yet.</p>
+        </div>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        // Import Firebase modules
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+
+        // Safely parse Firebase config from the environment.
+        let firebaseConfig;
+        try {
+            firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        } catch (e) {
+            console.error("Error parsing Firebase config:", e);
+            firebaseConfig = {}; // Default to an empty object on error
+        }
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        // UI Elements
+        const beacon = document.getElementById('beacon');
+        const beaconStatusText = document.getElementById('beacon-status-text');
+        const messageLog = document.getElementById('message-log');
+        
+        let beaconTimeout;
+
+        // Function to update the UI
+        const updateUI = (data) => {
+            if (data && data.active && data.expireAt) {
+                const expireDate = data.expireAt.toDate();
+                const now = new Date();
+
+                if (expireDate > now) {
+                    // Beacon is active
+                    beacon.classList.remove('bg-gray-700');
+                    beacon.classList.add('bg-blue-400', 'shadow-blue-300/50');
+                    beaconStatusText.textContent = 'ACTIVE';
+                    beaconStatusText.classList.remove('text-gray-400');
+                    beaconStatusText.classList.add('text-blue-900');
+                    messageLog.textContent = data.message || 'No message content.';
+                    
+                    // Set a timeout to turn off the beacon when it expires
+                    const timeToExpire = expireDate.getTime() - now.getTime();
+                    clearTimeout(beaconTimeout); // Clear previous timeout if any
+                    beaconTimeout = setTimeout(() => {
+                        setBeaconOffline();
+                    }, timeToExpire);
+
+                } else {
+                    // Expired beacon
+                    setBeaconOffline();
+                }
+            } else {
+                // No active beacon
+                setBeaconOffline();
+            }
+        };
+
+        const setBeaconOffline = () => {
+            beacon.classList.add('bg-gray-700');
+            beacon.classList.remove('bg-blue-400', 'shadow-blue-300/50');
+            beaconStatusText.textContent = 'OFFLINE';
+            beaconStatusText.classList.add('text-gray-400');
+            beaconStatusText.classList.remove('text-blue-900');
+            // We keep the last message displayed even when offline
+        };
+
+        // Main function to connect and listen
+        async function main() {
+            try {
+                // Sign in using the provided token or fall back to anonymous sign-in
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                    console.log("Signed in with custom token.");
+                } else {
+                    await signInAnonymously(auth);
+                    console.log("Signed in anonymously.");
+                }
+
+                // Listen for real-time updates on the beacon status document
+                const beaconDocRef = doc(db, 'beacon', 'status');
+                
+                onSnapshot(beaconDocRef, (doc) => {
+                    console.log("Received data from Firestore:", doc.data());
+                    if (doc.exists()) {
+                        updateUI(doc.data());
+                    } else {
+                        console.log("Beacon document does not exist.");
+                        setBeaconOffline();
+                    }
+                }, (error) => {
+                    console.error("Error listening to beacon status:", error);
+                });
+
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+                messageLog.textContent = "Could not connect to the beacon service.";
+            }
+        }
+        
+        // Run the app
+        main();
+
+    </script>
+</body>
+</html>
+
